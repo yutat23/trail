@@ -367,10 +367,10 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `trail - tail with log-rotate follow
 
 USAGE
-	trail [options] <command> [options] <path>
+  trail [options] <command> [options] <path>
 COMMANDS
-	-f, file       Tail a file and follow it
-	-d, dir        Tail the latest file in a directory and follow it
+  -f, file       Tail a file and follow it
+  -d, dir        Tail the latest file in a directory and follow it
 
 COMMON OPTIONS
   -h, --help         Show this help
