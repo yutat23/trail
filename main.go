@@ -7,12 +7,114 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/fsnotify/fsnotify"
 	"github.com/hpcloud/tail"
 )
+
+// ---------- 色付き表示のための構造体 ----------
+
+type ColorPattern struct {
+	Pattern *regexp.Regexp
+	Color   *color.Color
+}
+
+var colorPatterns []ColorPattern
+
+// 色名をcolor.Colorに変換
+func getColor(colorName string) *color.Color {
+	switch strings.ToLower(colorName) {
+	case "red":
+		return color.New(color.FgRed)
+	case "green":
+		return color.New(color.FgGreen)
+	case "blue":
+		return color.New(color.FgBlue)
+	case "yellow":
+		return color.New(color.FgYellow)
+	case "magenta":
+		return color.New(color.FgMagenta)
+	case "cyan":
+		return color.New(color.FgCyan)
+	case "white":
+		return color.New(color.FgWhite)
+	case "black":
+		return color.New(color.FgBlack)
+	case "brightred":
+		return color.New(color.FgHiRed)
+	case "brightgreen":
+		return color.New(color.FgHiGreen)
+	case "brightblue":
+		return color.New(color.FgHiBlue)
+	case "brightyellow":
+		return color.New(color.FgHiYellow)
+	case "brightmagenta":
+		return color.New(color.FgHiMagenta)
+	case "brightcyan":
+		return color.New(color.FgHiCyan)
+	case "brightwhite":
+		return color.New(color.FgHiWhite)
+	default:
+		return color.New(color.FgWhite) // デフォルトは白色
+	}
+}
+
+// 文字列に色付きパターンを適用
+func applyColorPatterns(text string) string {
+	result := text
+	for _, pattern := range colorPatterns {
+		matches := pattern.Pattern.FindAllStringIndex(text, -1)
+		// 後ろから処理してインデックスがずれないようにする
+		for i := len(matches) - 1; i >= 0; i-- {
+			match := matches[i]
+			matchedText := text[match[0]:match[1]]
+			coloredText := pattern.Color.Sprint(matchedText)
+			result = result[:match[0]] + coloredText + result[match[1]:]
+		}
+	}
+	return result
+}
+
+// 色付きパターンを解析
+func parseColorPatterns(colorOpts string) {
+	patterns := strings.Split(colorOpts, ",")
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		
+		// "color:regex" の形式で解析
+		parts := strings.SplitN(pattern, ":", 2)
+		if len(parts) != 2 {
+			log.Printf("invalid color pattern format: %s (expected 'color:regex')", pattern)
+			continue
+		}
+		
+		colorName := strings.TrimSpace(parts[0])
+		regexStr := strings.TrimSpace(parts[1])
+		
+		// 正規表現をコンパイル
+		regex, err := regexp.Compile(regexStr)
+		if err != nil {
+			log.Printf("invalid regex pattern '%s': %v", regexStr, err)
+			continue
+		}
+		
+		// 色を取得
+		color := getColor(colorName)
+		
+		// パターンを追加
+		colorPatterns = append(colorPatterns, ColorPattern{
+			Pattern: regex,
+			Color:   color,
+		})
+	}
+}
 
 // ---------- 共通ヘルパ ----------
 
@@ -57,7 +159,8 @@ func follow(path string) error {
 		return err
 	}
 	for line := range t.Lines {
-		fmt.Println(line.Text)
+		coloredLine := applyColorPatterns(line.Text)
+		fmt.Println(coloredLine)
 	}
 	return nil
 }
@@ -67,12 +170,18 @@ func follow(path string) error {
 func cmdFile(args []string) {
 	fs := flag.NewFlagSet("file", flag.ExitOnError)
 	nLines := fs.Int("n", 10, "show last N lines then follow")
+	colorOpts := fs.String("c", "", "color patterns in format 'color:regex' (can be used multiple times)")
 	fs.Parse(args)
 
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: trail file [options] <file>")
 	}
 	file := fs.Arg(0)
+
+	// 色付きパターンを解析
+	if *colorOpts != "" {
+		parseColorPatterns(*colorOpts)
+	}
 
 	// 直近 N 行だけ先に出力
 	printLastN(file, *nLines)
@@ -92,7 +201,8 @@ func printLastN(path string, n int) {
 		n = len(all)
 	}
 	for _, l := range all[len(all)-n:] {
-		fmt.Println(l)
+		coloredLine := applyColorPatterns(l)
+		fmt.Println(coloredLine)
 	}
 }
 
@@ -101,11 +211,17 @@ func printLastN(path string, n int) {
 func cmdDir(args []string) {
 	fs := flag.NewFlagSet("dir", flag.ExitOnError)
 	interval := fs.Duration("interval", 5*time.Second, "fallback polling interval")
+	colorOpts := fs.String("c", "", "color patterns in format 'color:regex' (can be used multiple times)")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: trail dir [options] <directory>")
 	}
 	dir := fs.Arg(0)
+
+	// 色付きパターンを解析
+	if *colorOpts != "" {
+		parseColorPatterns(*colorOpts)
+	}
 
 	// 最初の対象ファイル
 	current, err := newestFile(dir)
@@ -179,13 +295,19 @@ COMMON OPTIONS
 
 file OPTIONS
   -n <N>         Print last N lines before following (default 10)
+  -c <patterns>  Color patterns in format 'color:regex' (can be used multiple times)
+                 Colors: red, green, blue, yellow, magenta, cyan, white, black
+                 Bright colors: brightred, brightgreen, brightblue, brightyellow, brightmagenta, brightcyan, brightwhite
 
 dir  OPTIONS
   -interval <d>  Polling fallback interval (default 5s)
+  -c <patterns>  Color patterns in format 'color:regex' (can be used multiple times)
 
 EXAMPLES
   trail file -n 100 app.log
   trail dir  "C:\Logs\MyService"
+  trail file -c "red:ERROR,green:DEBUG,blue:\d{2}-\d{2}" app.log
+  trail dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
 `)
 	os.Exit(1)
 }
