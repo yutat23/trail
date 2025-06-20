@@ -11,6 +11,9 @@
 
 A robust file tailing utility written in Go that provides enhanced functionality for monitoring log files with automatic log rotation support and colored output.
 
+
+[trail.webm](https://github.com/user-attachments/assets/35fb14cc-0d69-436e-b30e-6f21eac73f97)
+
 ## Features
 
 - **File Tailing**: Monitor individual files with real-time output
