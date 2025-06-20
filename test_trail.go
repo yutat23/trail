@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	fmt.Println("=== Trail テストプログラム ===")
+	fmt.Println("=== Trail Test Program ===")
 	
 	// テスト用ディレクトリとファイルの準備
 	testDir := "./test_logs"
@@ -19,33 +19,33 @@ func main() {
 	
 	// テストディレクトリを作成
 	if err := os.MkdirAll(testDir, 0755); err != nil {
-		log.Fatalf("テストディレクトリの作成に失敗: %v", err)
+		log.Fatalf("Failed to create test directory: %v", err)
 	}
 	
 	// テスト終了時のクリーンアップ
 	defer func() {
-		fmt.Println("\n=== クリーンアップ ===")
+		fmt.Println("\n=== Cleanup ===")
 		if err := os.RemoveAll(testDir); err != nil {
-			fmt.Printf("クリーンアップエラー: %v\n", err)
+			fmt.Printf("Cleanup error: %v\n", err)
 		} else {
-			fmt.Println("テストファイルを削除しました")
+			fmt.Println("Test files deleted")
 		}
 	}()
 	
 	// テスト1: 色付き表示のテスト
-	fmt.Println("\n1. 色付き表示のテスト")
+	fmt.Println("\n1. Color Output Test")
 	testColorOutput(testFile)
 	
 	// テスト2: ログローテーションのテスト
-	fmt.Println("\n2. ログローテーションのテスト")
+	fmt.Println("\n2. Log Rotation Test")
 	testLogRotation(testDir, testFile)
 	
-	fmt.Println("\n=== テスト完了 ===")
+	fmt.Println("\n=== Test Completed ===")
 }
 
 // 色付き表示のテスト
 func testColorOutput(testFile string) {
-	fmt.Println("色付き表示をテスト中...")
+	fmt.Println("Testing color output...")
 	
 	// テスト用ログファイルを作成
 	createTestLog(testFile)
@@ -56,26 +56,26 @@ func testColorOutput(testFile string) {
 	cmd.Stderr = os.Stderr
 	
 	if err := cmd.Start(); err != nil {
-		log.Printf("trailコマンドの開始に失敗: %v", err)
+		log.Printf("Failed to start trail command: %v", err)
 		return
 	}
 	
 	// 少し待ってから新しいログを追加
 	time.Sleep(2 * time.Second)
-	appendTestLog(testFile, "新しいERRORメッセージ")
-	appendTestLog(testFile, "新しいDEBUGメッセージ")
-	appendTestLog(testFile, "新しいWARNメッセージ")
+	appendTestLog(testFile, "New ERROR message")
+	appendTestLog(testFile, "New DEBUG message")
+	appendTestLog(testFile, "New WARN message")
 	
 	// さらに待ってから終了
 	time.Sleep(3 * time.Second)
 	cmd.Process.Kill()
 	
-	fmt.Println("色付き表示テスト完了")
+	fmt.Println("Color output test completed")
 }
 
 // ログローテーションのテスト
 func testLogRotation(testDir, testFile string) {
-	fmt.Println("ログローテーションをテスト中...")
+	fmt.Println("Testing log rotation...")
 	
 	// 初期ログファイルを作成
 	createTestLog(testFile)
@@ -86,7 +86,7 @@ func testLogRotation(testDir, testFile string) {
 	cmd.Stderr = os.Stderr
 	
 	if err := cmd.Start(); err != nil {
-		log.Printf("trailコマンドの開始に失敗: %v", err)
+		log.Printf("Failed to start trail command: %v", err)
 		return
 	}
 	
@@ -96,20 +96,20 @@ func testLogRotation(testDir, testFile string) {
 	// ログローテーション: 現在のファイルをリネームして新しいファイルを作成
 	rotatedFile := testFile + "." + strconv.FormatInt(time.Now().Unix(), 10)
 	if err := os.Rename(testFile, rotatedFile); err != nil {
-		log.Printf("ファイルのリネームに失敗: %v", err)
+		log.Printf("Failed to rename file: %v", err)
 		return
 	}
 	
 	// 新しいログファイルを作成
 	createTestLog(testFile)
-	appendTestLog(testFile, "ローテーション後のERRORメッセージ")
-	appendTestLog(testFile, "ローテーション後のDEBUGメッセージ")
+	appendTestLog(testFile, "ERROR message after rotation")
+	appendTestLog(testFile, "DEBUG message after rotation")
 	
 	// さらに待ってから終了
 	time.Sleep(3 * time.Second)
 	cmd.Process.Kill()
 	
-	fmt.Println("ログローテーションテスト完了")
+	fmt.Println("Log rotation test completed")
 }
 
 // テスト用ログファイルを作成
@@ -128,7 +128,7 @@ func createTestLog(filePath string) {
 `
 	
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		log.Printf("ログファイルの作成に失敗: %v", err)
+		log.Printf("Failed to create log file: %v", err)
 	}
 }
 
@@ -139,12 +139,12 @@ func appendTestLog(filePath, message string) {
 	
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Printf("ログファイルのオープンに失敗: %v", err)
+		log.Printf("Failed to open log file: %v", err)
 		return
 	}
 	defer file.Close()
 	
 	if _, err := file.WriteString(logLine); err != nil {
-		log.Printf("ログの追加に失敗: %v", err)
+		log.Printf("Failed to append log: %v", err)
 	}
 } 

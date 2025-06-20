@@ -120,10 +120,24 @@ func parseColorPatterns(colorOpts string) {
 
 // 最新 (mod time が最大) の通常ファイルを返す
 func newestFile(dir string) (string, error) {
+	return newestFileWithPattern(dir, "*")
+}
+
+// ワイルドカードパターンにマッチする最新のファイルを返す
+func newestFileWithPattern(dir, pattern string) (string, error) {
 	var newest string
 	var newestMod time.Time
 
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	// ワイルドカードパターンを正規表現に変換
+	regexPattern := strings.ReplaceAll(pattern, ".", "\\.")
+	regexPattern = strings.ReplaceAll(regexPattern, "*", ".*")
+	regexPattern = strings.ReplaceAll(regexPattern, "?", ".")
+	regex, err := regexp.Compile("^" + regexPattern + "$")
+	if err != nil {
+		return "", fmt.Errorf("invalid pattern '%s': %v", pattern, err)
+	}
+
+	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -131,8 +145,13 @@ func newestFile(dir string) (string, error) {
 		if err != nil {
 			return err
 		}
-		if info.Mode().IsRegular() && info.ModTime().After(newestMod) {
-			newest, newestMod = p, info.ModTime()
+		if info.Mode().IsRegular() {
+			// ファイル名のみを取得
+			fileName := filepath.Base(p)
+			// パターンにマッチするかチェック
+			if regex.MatchString(fileName) && info.ModTime().After(newestMod) {
+				newest, newestMod = p, info.ModTime()
+			}
 		}
 		return nil
 	})
@@ -140,7 +159,7 @@ func newestFile(dir string) (string, error) {
 		return "", err
 	}
 	if newest == "" {
-		return "", fmt.Errorf("no regular files in %s", dir)
+		return "", fmt.Errorf("no files matching pattern '%s' in %s", pattern, dir)
 	}
 	return newest, nil
 }
@@ -212,6 +231,7 @@ func cmdDir(args []string) {
 	fs := flag.NewFlagSet("dir", flag.ExitOnError)
 	interval := fs.Duration("interval", 5*time.Second, "fallback polling interval")
 	colorOpts := fs.String("c", "", "color patterns in format 'color:regex' (can be used multiple times)")
+	pattern := fs.String("pattern", "*", "file pattern to match (e.g., '*.log', 'app-*.log')")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: trail dir [options] <directory>")
@@ -224,11 +244,11 @@ func cmdDir(args []string) {
 	}
 
 	// 最初の対象ファイル
-	current, err := newestFile(dir)
+	current, err := newestFileWithPattern(dir, *pattern)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("trailing %s", current)
+	log.Printf("trailing %s (pattern: %s)", current, *pattern)
 	go func() {
 		if err := follow(current); err != nil {
 			log.Fatal(err)
@@ -245,14 +265,14 @@ func cmdDir(args []string) {
 		select {
 		case ev := <-watcher.Events:
 			if ev.Op&(fsnotify.Create|fsnotify.Rename) != 0 {
-				if latest, _ := newestFile(dir); latest != current {
+				if latest, _ := newestFileWithPattern(dir, *pattern); latest != current {
 					current = latest
 					log.Printf("switching to %s", current)
 					go follow(current)
 				}
 			}
 		case <-timer.C: // 監視失敗時の保険
-			if latest, _ := newestFile(dir); latest != current {
+			if latest, _ := newestFileWithPattern(dir, *pattern); latest != current {
 				current = latest
 				log.Printf("switching to %s", current)
 				go follow(current)
@@ -261,6 +281,67 @@ func cmdDir(args []string) {
 			log.Printf("watch error: %v", err)
 		}
 	}
+}
+
+// ---------- ロゴ表示 ----------
+
+func showLogo() {
+	// 色付きロゴを表示（エラーが発生した場合はシンプル版を表示）
+	if err := showColoredLogo(); err != nil {
+		showSimpleLogo()
+	}
+}
+
+func showSimpleLogo() {
+	logo := `
+████████╗██████╗  █████╗ ██╗██╗     
+╚══██╔══╝██╔══██╗██╔══██╗██║██║     
+   ██║   ██████╔╝███████║██║██║     
+   ██║   ██╔══██╗██╔══██║██║██║     
+   ██║   ██║  ██║██║  ██║██║███████╗
+   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝
+                                    
+   Tail with log-rotate follow
+   Version 1.0.0
+`
+	fmt.Print(logo)
+}
+
+func showColoredLogo() error {
+	// グラデーション効果でロゴを表示
+	colors := []*color.Color{
+		color.New(color.FgHiBlue),
+		color.New(color.FgHiCyan),
+		color.New(color.FgHiGreen),
+		color.New(color.FgHiYellow),
+		color.New(color.FgHiRed),
+		color.New(color.FgHiMagenta),
+	}
+	
+	logoLines := []string{
+		"████████╗██████╗  █████╗ ██╗██╗     ",
+		"╚══██╔══╝██╔══██╗██╔══██╗██║██║     ",
+		"   ██║   ██████╔╝███████║██║██║     ",
+		"   ██║   ██╔══██╗██╔══██║██║██║     ",
+		"   ██║   ██║  ██║██║  ██║██║███████╗",
+		"   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝",
+		"",
+		"   Tail with log-rotate follow",
+		"   Version 1.0.0",
+	}
+	
+	for i, line := range logoLines {
+		if line == "" {
+			fmt.Println()
+			continue
+		}
+		
+		// ロゴの各行に異なる色を適用
+		colorIndex := i % len(colors)
+		colors[colorIndex].Println(line)
+	}
+	
+	return nil
 }
 
 // ---------- main ----------
@@ -282,16 +363,19 @@ func main() {
 }
 
 func usage() {
+	showLogo()
 	fmt.Fprintf(os.Stderr, `trail - tail with log-rotate follow
 
 USAGE
-	trail <command> [options] <path>
+	trail [options] <command> [options] <path>
 COMMANDS
 	-f, file       Tail a file and follow it
 	-d, dir        Tail the latest file in a directory and follow it
 
 COMMON OPTIONS
-  -h, --help     Show this help
+  -h, --help         Show this help
+  --no-logo          Disable logo display
+  --no-color-logo    Disable colored logo (use simple ASCII art)
 
 file OPTIONS
   -n <N>         Print last N lines before following (default 10)
@@ -302,12 +386,18 @@ file OPTIONS
 dir  OPTIONS
   -interval <d>  Polling fallback interval (default 5s)
   -c <patterns>  Color patterns in format 'color:regex' (can be used multiple times)
+  -pattern <p>   File pattern to match (e.g., '*.log', 'app-*.log', 'service-*.txt')
 
 EXAMPLES
   trail file -n 100 app.log
   trail dir  "C:\Logs\MyService"
+  trail dir -pattern "*.log" "C:\Logs\MyService"
+  trail dir -pattern "app-*.log" "C:\Logs\MyService"
   trail file -c "red:ERROR,green:DEBUG,blue:\d{2}-\d{2}" app.log
   trail dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
+  trail dir -pattern "*.log" -c "red:ERROR" "C:\Logs\MyService"
+  trail --no-logo file app.log
+  trail --no-color-logo file app.log
 `)
 	os.Exit(1)
 }

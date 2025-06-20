@@ -6,6 +6,7 @@ A robust file tailing utility written in Go that provides enhanced functionality
 
 - **File Tailing**: Monitor individual files with real-time output
 - **Directory Monitoring**: Automatically tail the latest file in a directory
+- **Pattern Matching**: Support for wildcard patterns to filter files (e.g., `*.log`, `app-*.log`)
 - **Log Rotation Support**: Seamlessly follows files even when they are rotated
 - **Colored Output**: Highlight specific patterns with custom colors using regular expressions
 - **Configurable**: Customizable options for different use cases
@@ -29,7 +30,7 @@ trail <command> [options] <path>
 ### Commands
 
 - `file` or `-f`: Tail a specific file and follow it
-- `dir` or `-d`: Tail the latest file in a directory and follow it
+- `dir` or `-d`: Tail the latest file in a directory
 - `help`, `-h`, or `--help`: Show help message
 
 ### File Mode
@@ -90,6 +91,16 @@ trail dir [options] <directory_path>
 
 - `-interval <duration>`: Polling fallback interval (default: 5s)
 - `-c <patterns>`: Color patterns in format 'color:regex' (can be used multiple times)
+- `-pattern <pattern>`: File pattern to match (e.g., `*.log`, `app-*.log`, `service-*.txt`)
+
+#### Pattern Matching
+
+The `-pattern` option allows you to specify which files to monitor using wildcard patterns:
+
+- `*.log` - Monitor all files with `.log` extension
+- `app-*.log` - Monitor files starting with "app-" and ending with ".log"
+- `service-*.txt` - Monitor files starting with "service-" and ending with ".txt"
+- `*` - Monitor all files (default behavior)
 
 #### Examples
 
@@ -97,15 +108,27 @@ trail dir [options] <directory_path>
 # Monitor the latest file in the logs directory
 trail dir ./logs
 
+# Monitor only .log files in the directory
+trail dir -pattern "*.log" ./logs
+
+# Monitor files with specific naming pattern
+trail dir -pattern "app-*.log" ./logs
+trail dir -pattern "service-*.txt" ./logs
+
 # Monitor with custom polling interval
 trail dir -interval 10s ./logs
 
 # Monitor with colored output
 trail dir -c "red:ERROR,green:DEBUG,yellow:WARN" ./logs
 
+# Combine pattern matching with colored output
+trail dir -pattern "*.log" -c "red:ERROR,green:DEBUG,yellow:WARN" ./logs
+
 # On Windows
 trail.exe dir "C:\Logs\MyService"
+trail.exe dir -pattern "*.log" "C:\Logs\MyService"
 trail.exe dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
+trail.exe dir -pattern "app-*.log" -c "red:ERROR" "C:\Logs\MyService"
 ```
 
 ## How It Works
@@ -118,6 +141,7 @@ trail.exe dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
 
 ### Directory Mode
 - Scans the directory to find the file with the latest modification time
+- Supports wildcard pattern matching to filter files (e.g., only `.log` files)
 - Monitors the directory for new files
 - Automatically switches to newer files when they appear
 - Uses filesystem notifications with polling fallback for reliability
