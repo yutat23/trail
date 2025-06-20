@@ -1,5 +1,14 @@
 # Trail
 
+```
+████████╗██████╗  █████╗ ██╗██╗     
+╚══██╔══╝██╔══██╗██╔══██╗██║██║     
+   ██║   ██████╔╝███████║██║██║     
+   ██║   ██╔══██╗██╔══██║██║██║     
+   ██║   ██║  ██║██║  ██║██║███████╗
+   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝
+```
+
 A robust file tailing utility written in Go that provides enhanced functionality for monitoring log files with automatic log rotation support and colored output.
 
 ## Features
