@@ -6,12 +6,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 )
 
 func main() {
 	fmt.Println("=== Trail Test Program ===")
+	
+	// 実行ファイルの存在確認
+	execPath := getExecutablePath()
+	if execPath == getExecutableName() {
+		fmt.Printf("Warning: Could not find trail executable. Make sure to build the project first:\n")
+		fmt.Printf("  go build -o %s\n", getExecutableName())
+		fmt.Printf("  or\n")
+		fmt.Printf("  go install\n")
+		fmt.Println()
+	} else {
+		fmt.Printf("Found trail executable at: %s\n", execPath)
+	}
 	
 	// テスト用ディレクトリとファイルの準備
 	testDir := "./test_logs"
@@ -43,6 +56,36 @@ func main() {
 	fmt.Println("\n=== Test Completed ===")
 }
 
+// 実行ファイル名を動的に決定
+func getExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "trail.exe"
+	}
+	return "trail"
+}
+
+// 実行ファイルのパスを取得
+func getExecutablePath() string {
+	execName := getExecutableName()
+	
+	// 現在のディレクトリで実行ファイルを探す
+	currentDir, err := os.Getwd()
+	if err == nil {
+		currentPath := filepath.Join(currentDir, execName)
+		if _, err := os.Stat(currentPath); err == nil {
+			return currentPath
+		}
+	}
+	
+	// PATH環境変数から実行ファイルを探す
+	if path, err := exec.LookPath(execName); err == nil {
+		return path
+	}
+	
+	// 見つからない場合は実行ファイル名のみを返す
+	return execName
+}
+
 // 色付き表示のテスト
 func testColorOutput(testFile string) {
 	fmt.Println("Testing color output...")
@@ -51,7 +94,8 @@ func testColorOutput(testFile string) {
 	createTestLog(testFile)
 	
 	// trailコマンドを実行（非同期）
-	cmd := exec.Command("./trail.exe", "file", "-c", "red:ERROR,green:DEBUG,yellow:WARN", testFile)
+	execPath := getExecutablePath()
+	cmd := exec.Command(execPath, "file", "-c", "red:ERROR,green:DEBUG,yellow:WARN", testFile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
@@ -81,7 +125,8 @@ func testLogRotation(testDir, testFile string) {
 	createTestLog(testFile)
 	
 	// trailコマンドを実行（非同期）
-	cmd := exec.Command("./trail.exe", "dir", "-c", "red:ERROR,green:DEBUG", testDir)
+	execPath := getExecutablePath()
+	cmd := exec.Command(execPath, "dir", "-c", "red:ERROR,green:DEBUG", testDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
