@@ -25,6 +25,9 @@ type ColorPattern struct {
 
 var colorPatterns []ColorPattern
 
+// バージョン情報
+const version = "0.1.1"
+
 // 色名をcolor.Colorに変換
 func getColor(colorName string) *color.Color {
 	switch strings.ToLower(colorName) {
@@ -65,17 +68,80 @@ func getColor(colorName string) *color.Color {
 
 // 文字列に色付きパターンを適用
 func applyColorPatterns(text string) string {
-	result := text
+	if len(colorPatterns) == 0 {
+		return text
+	}
+
+	// 各パターンのマッチ結果を収集
+	type colorMatch struct {
+		start int
+		end   int
+		color *color.Color
+	}
+
+	var allMatches []colorMatch
+
+	// すべてのパターンのマッチを収集
 	for _, pattern := range colorPatterns {
 		matches := pattern.Pattern.FindAllStringIndex(text, -1)
-		// 後ろから処理してインデックスがずれないようにする
-		for i := len(matches) - 1; i >= 0; i-- {
-			match := matches[i]
-			matchedText := text[match[0]:match[1]]
-			coloredText := pattern.Color.Sprint(matchedText)
-			result = result[:match[0]] + coloredText + result[match[1]:]
+		for _, match := range matches {
+			allMatches = append(allMatches, colorMatch{
+				start: match[0],
+				end:   match[1],
+				color: pattern.Color,
+			})
 		}
 	}
+
+	// マッチがない場合は元のテキストを返す
+	if len(allMatches) == 0 {
+		return text
+	}
+
+	// 開始位置でソート（重複する場合は長い方を優先）
+	for i := 0; i < len(allMatches)-1; i++ {
+		for j := i + 1; j < len(allMatches); j++ {
+			if allMatches[i].start > allMatches[j].start ||
+				(allMatches[i].start == allMatches[j].start && allMatches[i].end-allMatches[i].start < allMatches[j].end-allMatches[j].start) {
+				allMatches[i], allMatches[j] = allMatches[j], allMatches[i]
+			}
+		}
+	}
+
+	// 重複する範囲を除去（最初にマッチしたものを優先）
+	var finalMatches []colorMatch
+	for _, match := range allMatches {
+		overlaps := false
+		for _, existing := range finalMatches {
+			// 重複チェック
+			if (match.start >= existing.start && match.start < existing.end) ||
+				(match.end > existing.start && match.end <= existing.end) ||
+				(match.start <= existing.start && match.end >= existing.end) {
+				overlaps = true
+				break
+			}
+		}
+		if !overlaps {
+			finalMatches = append(finalMatches, match)
+		}
+	}
+
+	// 結果を構築
+	result := ""
+	lastEnd := 0
+
+	for _, match := range finalMatches {
+		// マッチ前の部分を追加
+		result += text[lastEnd:match.start]
+		// 色付きテキストを追加
+		matchedText := text[match.start:match.end]
+		result += match.color.Sprint(matchedText)
+		lastEnd = match.end
+	}
+
+	// 残りの部分を追加
+	result += text[lastEnd:]
+
 	return result
 }
 
@@ -87,27 +153,27 @@ func parseColorPatterns(colorOpts string) {
 		if pattern == "" {
 			continue
 		}
-		
+
 		// "color:regex" の形式で解析
 		parts := strings.SplitN(pattern, ":", 2)
 		if len(parts) != 2 {
 			log.Printf("invalid color pattern format: %s (expected 'color:regex')", pattern)
 			continue
 		}
-		
+
 		colorName := strings.TrimSpace(parts[0])
 		regexStr := strings.TrimSpace(parts[1])
-		
+
 		// 正規表現をコンパイル
 		regex, err := regexp.Compile(regexStr)
 		if err != nil {
 			log.Printf("invalid regex pattern '%s': %v", regexStr, err)
 			continue
 		}
-		
+
 		// 色を取得
 		color := getColor(colorName)
-		
+
 		// パターンを追加
 		colorPatterns = append(colorPatterns, ColorPattern{
 			Pattern: regex,
@@ -302,7 +368,7 @@ func showSimpleLogo() {
    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝
                                     
    Tail with log-rotate follow
-   Version 1.0.0
+   Version ` + version + `
 `
 	fmt.Print(logo)
 }
@@ -317,7 +383,6 @@ func showColoredLogo() error {
 		color.New(color.FgHiRed),
 		color.New(color.FgHiMagenta),
 	}
-	
 	logoLines := []string{
 		"████████╗██████╗  █████╗ ██╗██╗     ",
 		"╚══██╔══╝██╔══██╗██╔══██╗██║██║     ",
@@ -327,20 +392,20 @@ func showColoredLogo() error {
 		"   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝",
 		"",
 		"   Tail with log-rotate follow",
-		"   Version 1.0.0",
+		"   Version " + version,
 	}
-	
+
 	for i, line := range logoLines {
 		if line == "" {
 			fmt.Println()
 			continue
 		}
-		
+
 		// ロゴの各行に異なる色を適用
 		colorIndex := i % len(colors)
 		colors[colorIndex].Println(line)
 	}
-	
+
 	return nil
 }
 
