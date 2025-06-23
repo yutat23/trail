@@ -34,5 +34,5 @@ go.work.sum
 # .vscode/
 
 logs/
-/test_logs
-/test.log
+test/test_logs/
+test/test.log
