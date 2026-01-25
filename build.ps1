@@ -1,6 +1,15 @@
 # wingetパッケージ用ビルドスクリプト
 $appname = "trail"
-$version = "0.1.1"
+
+# main.goからバージョンを自動取得
+$versionMatch = Select-String -Path "main.go" -Pattern 'const version = "([^"]+)"' | Select-Object -First 1
+if ($versionMatch) {
+    $version = $versionMatch.Matches.Groups[1].Value
+    Write-Host "Detected version: $version" -ForegroundColor Green
+} else {
+    Write-Host "Warning: Could not detect version from main.go, using default" -ForegroundColor Yellow
+    $version = "0.0.0"
+}
 
 # リリースディレクトリを作成
 $releaseDir = "release"

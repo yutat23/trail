@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -26,7 +27,7 @@ type ColorPattern struct {
 var colorPatterns []ColorPattern
 
 // バージョン情報
-const version = "0.1.1"
+const version = "0.1.2"
 
 // 色名をcolor.Colorに変換
 func getColor(colorName string) *color.Color {
@@ -238,6 +239,7 @@ func follow(path string) error {
 		MustExist: true,
 		Poll:      true, // cross-platform
 		Logger:    tail.DiscardingLogger,
+		Location:  &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}, // ファイルの末尾から読み始める
 	}
 	t, err := tail.TailFile(path, cfg)
 	if err != nil {
@@ -298,6 +300,7 @@ func cmdDir(args []string) {
 	interval := fs.Duration("interval", 5*time.Second, "fallback polling interval")
 	colorOpts := fs.String("c", "", "color patterns in format 'color:regex' (can be used multiple times)")
 	pattern := fs.String("pattern", "*", "file pattern to match (e.g., '*.log', 'app-*.log')")
+	nLines := fs.Int("n", 10, "show last N lines then follow")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: trail dir [options] <directory>")
@@ -315,6 +318,10 @@ func cmdDir(args []string) {
 		log.Fatal(err)
 	}
 	log.Printf("trailing %s (pattern: %s)", current, *pattern)
+
+	// 直近 N 行だけ先に出力
+	printLastN(current, *nLines)
+
 	go func() {
 		if err := follow(current); err != nil {
 			log.Fatal(err)
@@ -334,6 +341,8 @@ func cmdDir(args []string) {
 				if latest, _ := newestFileWithPattern(dir, *pattern); latest != current {
 					current = latest
 					log.Printf("switching to %s", current)
+					// 新しいファイルの直近 N 行だけ先に出力
+					printLastN(current, *nLines)
 					go follow(current)
 				}
 			}
@@ -341,6 +350,8 @@ func cmdDir(args []string) {
 			if latest, _ := newestFileWithPattern(dir, *pattern); latest != current {
 				current = latest
 				log.Printf("switching to %s", current)
+				// 新しいファイルの直近 N 行だけ先に出力
+				printLastN(current, *nLines)
 				go follow(current)
 			}
 		case err := <-watcher.Errors:
@@ -449,6 +460,7 @@ file OPTIONS
                  Bright colors: brightred, brightgreen, brightblue, brightyellow, brightmagenta, brightcyan, brightwhite
 
 dir  OPTIONS
+  -n <N>         Print last N lines before following (default 10)
   -interval <d>  Polling fallback interval (default 5s)
   -c <patterns>  Color patterns in format 'color:regex' (can be used multiple times)
   -pattern <p>   File pattern to match (e.g., '*.log', 'app-*.log', 'service-*.txt')
@@ -456,8 +468,9 @@ dir  OPTIONS
 EXAMPLES
   trail file -n 100 app.log
   trail dir  "C:\Logs\MyService"
+  trail dir -n 20 "C:\Logs\MyService"
   trail dir -pattern "*.log" "C:\Logs\MyService"
-  trail dir -pattern "app-*.log" "C:\Logs\MyService"
+  trail dir -pattern "app-*.log" -n 50 "C:\Logs\MyService"
   trail file -c "red:ERROR,green:DEBUG,blue:\d{2}-\d{2}" app.log
   trail dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
   trail dir -pattern "*.log" -c "red:ERROR" "C:\Logs\MyService"

@@ -101,6 +101,7 @@ trail dir [options] <directory_path>
 
 #### Options
 
+- `-n <N>`: Print last N lines before following (default: 10)
 - `-interval <duration>`: Polling fallback interval (default: 5s)
 - `-c <patterns>`: Color patterns in format 'color:regex' (can be used multiple times)
 - `-pattern <pattern>`: File pattern to match (e.g., `*.log`, `app-*.log`, `service-*.txt`)
@@ -120,6 +121,9 @@ The `-pattern` option allows you to specify which files to monitor using wildcar
 # Monitor the latest file in the logs directory
 trail dir ./logs
 
+# Monitor with last 20 lines displayed first
+trail dir -n 20 ./logs
+
 # Monitor only .log files in the directory
 trail dir -pattern "*.log" ./logs
 
@@ -136,11 +140,15 @@ trail dir -c "red:ERROR,green:DEBUG,yellow:WARN" ./logs
 # Combine pattern matching with colored output
 trail dir -pattern "*.log" -c "red:ERROR,green:DEBUG,yellow:WARN" ./logs
 
+# Combine all options: pattern, last N lines, and colored output
+trail dir -pattern "app-*.log" -n 50 -c "red:ERROR" ./logs
+
 # On Windows
 trail.exe dir "C:\Logs\MyService"
+trail.exe dir -n 20 "C:\Logs\MyService"
 trail.exe dir -pattern "*.log" "C:\Logs\MyService"
 trail.exe dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
-trail.exe dir -pattern "app-*.log" -c "red:ERROR" "C:\Logs\MyService"
+trail.exe dir -pattern "app-*.log" -n 50 -c "red:ERROR" "C:\Logs\MyService"
 ```
 
 ## How It Works
