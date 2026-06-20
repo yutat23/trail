@@ -36,8 +36,16 @@ go build -o trail main.go
 ## Usage
 
 ```
-trail <command> [options] <path>
+trail [global options] <command> [options] <path>
 ```
+
+### Global Options
+
+- `-h`, `--help`: Show help message
+- `-v`, `--version`: Show version
+- `--no-logo`: Disable logo display
+- `--no-color-logo`: Disable colored logo
+- `--color <mode>`: Color output mode: `auto`, `always`, or `never` (default: `auto`)
 
 ### Commands
 
@@ -65,7 +73,8 @@ Available colors:
 - Bright colors: `brightred`, `brightgreen`, `brightblue`, `brightyellow`, `brightmagenta`, `brightcyan`, `brightwhite`
 
 Color pattern format: `color:regex`
-- Multiple patterns can be specified by separating with commas
+- Multiple patterns can be specified by separating with commas or by repeating `-c`
+- If matches overlap, later color patterns take precedence
 - Example: `"red:ERROR,green:DEBUG,yellow:WARN"`
 
 #### Examples
@@ -85,6 +94,10 @@ trail file -c "blue:\d{2}-\d{2}" app.log
 
 # Multiple color patterns
 trail file -c "red:ERROR,green:DEBUG,blue:\d{4}-\d{2}-\d{2}" app.log
+trail file -c "red:ERROR" -c "green:DEBUG" app.log
+
+# Force ANSI color output even when stdout is redirected
+trail --color always file -c "red:ERROR" app.log
 
 # On Windows
 trail.exe file "C:\Logs\application.log"
@@ -162,7 +175,7 @@ trail.exe dir -pattern "app-*.log" -n 50 -c "red:ERROR" "C:\Logs\MyService"
 ### Directory Mode
 - Scans the directory to find the file with the latest modification time
 - Supports wildcard pattern matching to filter files (e.g., only `.log` files)
-- Monitors the directory for new files
+- Monitors the directory for new files in that directory
 - Automatically switches to newer files when they appear
 - Uses filesystem notifications with polling fallback for reliability
 - Applies color highlighting to all monitored files
@@ -171,6 +184,7 @@ trail.exe dir -pattern "app-*.log" -n 50 -c "red:ERROR" "C:\Logs\MyService"
 - Uses regular expressions to match patterns in log lines
 - Supports multiple color patterns simultaneously
 - Processes patterns in order, with later patterns taking precedence
+- Respects terminal color detection by default; use `--color always` to force ANSI color output
 - Works with both file and directory monitoring modes
 
 ## Dependencies

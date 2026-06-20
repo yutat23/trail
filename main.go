@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,48 +23,70 @@ import (
 type ColorPattern struct {
 	Pattern *regexp.Regexp
 	Color   *color.Color
+	Order   int
 }
 
 var colorPatterns []ColorPattern
 
+type colorMode string
+
+const (
+	colorAuto   colorMode = "auto"
+	colorAlways colorMode = "always"
+	colorNever  colorMode = "never"
+)
+
+var selectedColorMode = colorAuto
+
 // バージョン情報
-const version = "0.1.2"
+const version = "0.1.3"
+
+func newColor(attrs ...color.Attribute) *color.Color {
+	c := color.New(attrs...)
+	switch selectedColorMode {
+	case colorAlways:
+		c.EnableColor()
+	case colorNever:
+		c.DisableColor()
+	}
+	return c
+}
 
 // 色名をcolor.Colorに変換
-func getColor(colorName string) *color.Color {
+func getColor(colorName string) (*color.Color, bool) {
 	switch strings.ToLower(colorName) {
 	case "red":
-		return color.New(color.FgRed)
+		return newColor(color.FgRed), true
 	case "green":
-		return color.New(color.FgGreen)
+		return newColor(color.FgGreen), true
 	case "blue":
-		return color.New(color.FgBlue)
+		return newColor(color.FgBlue), true
 	case "yellow":
-		return color.New(color.FgYellow)
+		return newColor(color.FgYellow), true
 	case "magenta":
-		return color.New(color.FgMagenta)
+		return newColor(color.FgMagenta), true
 	case "cyan":
-		return color.New(color.FgCyan)
+		return newColor(color.FgCyan), true
 	case "white":
-		return color.New(color.FgWhite)
+		return newColor(color.FgWhite), true
 	case "black":
-		return color.New(color.FgBlack)
+		return newColor(color.FgBlack), true
 	case "brightred":
-		return color.New(color.FgHiRed)
+		return newColor(color.FgHiRed), true
 	case "brightgreen":
-		return color.New(color.FgHiGreen)
+		return newColor(color.FgHiGreen), true
 	case "brightblue":
-		return color.New(color.FgHiBlue)
+		return newColor(color.FgHiBlue), true
 	case "brightyellow":
-		return color.New(color.FgHiYellow)
+		return newColor(color.FgHiYellow), true
 	case "brightmagenta":
-		return color.New(color.FgHiMagenta)
+		return newColor(color.FgHiMagenta), true
 	case "brightcyan":
-		return color.New(color.FgHiCyan)
+		return newColor(color.FgHiCyan), true
 	case "brightwhite":
-		return color.New(color.FgHiWhite)
+		return newColor(color.FgHiWhite), true
 	default:
-		return color.New(color.FgWhite) // デフォルトは白色
+		return nil, false
 	}
 }
 
@@ -73,48 +96,47 @@ func applyColorPatterns(text string) string {
 		return text
 	}
 
-	// 各パターンのマッチ結果を収集
 	type colorMatch struct {
 		start int
 		end   int
 		color *color.Color
+		order int
 	}
 
 	var allMatches []colorMatch
-
-	// すべてのパターンのマッチを収集
 	for _, pattern := range colorPatterns {
 		matches := pattern.Pattern.FindAllStringIndex(text, -1)
 		for _, match := range matches {
+			if match[0] == match[1] {
+				continue
+			}
 			allMatches = append(allMatches, colorMatch{
 				start: match[0],
 				end:   match[1],
 				color: pattern.Color,
+				order: pattern.Order,
 			})
 		}
 	}
-
-	// マッチがない場合は元のテキストを返す
 	if len(allMatches) == 0 {
 		return text
 	}
 
-	// 開始位置でソート（重複する場合は長い方を優先）
-	for i := 0; i < len(allMatches)-1; i++ {
-		for j := i + 1; j < len(allMatches); j++ {
-			if allMatches[i].start > allMatches[j].start ||
-				(allMatches[i].start == allMatches[j].start && allMatches[i].end-allMatches[i].start < allMatches[j].end-allMatches[j].start) {
-				allMatches[i], allMatches[j] = allMatches[j], allMatches[i]
-			}
+	// 重複する場合は、後から指定されたパターンを優先する。
+	sort.SliceStable(allMatches, func(i, j int) bool {
+		if allMatches[i].order != allMatches[j].order {
+			return allMatches[i].order > allMatches[j].order
 		}
-	}
+		if allMatches[i].end-allMatches[i].start != allMatches[j].end-allMatches[j].start {
+			return allMatches[i].end-allMatches[i].start > allMatches[j].end-allMatches[j].start
+		}
+		return allMatches[i].start < allMatches[j].start
+	})
 
-	// 重複する範囲を除去（最初にマッチしたものを優先）
 	var finalMatches []colorMatch
 	for _, match := range allMatches {
 		overlaps := false
 		for _, existing := range finalMatches {
-			// 重複チェック
 			if (match.start >= existing.start && match.start < existing.end) ||
 				(match.end > existing.start && match.end <= existing.end) ||
 				(match.start <= existing.start && match.end >= existing.end) {
@@ -126,64 +148,161 @@ func applyColorPatterns(text string) string {
 			finalMatches = append(finalMatches, match)
 		}
 	}
+	sort.Slice(finalMatches, func(i, j int) bool {
+		return finalMatches[i].start < finalMatches[j].start
+	})
 
-	// 結果を構築
-	result := ""
+	var result strings.Builder
 	lastEnd := 0
-
 	for _, match := range finalMatches {
-		// マッチ前の部分を追加
-		result += text[lastEnd:match.start]
-		// 色付きテキストを追加
-		matchedText := text[match.start:match.end]
-		result += match.color.Sprint(matchedText)
+		result.WriteString(text[lastEnd:match.start])
+		result.WriteString(match.color.Sprint(text[match.start:match.end]))
 		lastEnd = match.end
 	}
+	result.WriteString(text[lastEnd:])
 
-	// 残りの部分を追加
-	result += text[lastEnd:]
-
-	return result
+	return result.String()
 }
 
 // 色付きパターンを解析
-func parseColorPatterns(colorOpts string) {
-	patterns := strings.Split(colorOpts, ",")
-	for _, pattern := range patterns {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
+func parseColorPatterns(colorOpts []string) {
+	for _, colorOpt := range colorOpts {
+		patterns := strings.Split(colorOpt, ",")
+		for _, pattern := range patterns {
+			pattern = strings.TrimSpace(pattern)
+			if pattern == "" {
+				continue
+			}
+
+			parts := strings.SplitN(pattern, ":", 2)
+			if len(parts) != 2 {
+				log.Printf("invalid color pattern format: %s (expected 'color:regex')", pattern)
+				continue
+			}
+
+			colorName := strings.TrimSpace(parts[0])
+			regexStr := strings.TrimSpace(parts[1])
+			if regexStr == "" {
+				log.Printf("empty regex pattern in: %s", pattern)
+				continue
+			}
+
+			regex, err := regexp.Compile(regexStr)
+			if err != nil {
+				log.Printf("invalid regex pattern '%s': %v", regexStr, err)
+				continue
+			}
+
+			colorValue, ok := getColor(colorName)
+			if !ok {
+				log.Printf("invalid color name '%s'", colorName)
+				continue
+			}
+
+			colorPatterns = append(colorPatterns, ColorPattern{
+				Pattern: regex,
+				Color:   colorValue,
+				Order:   len(colorPatterns),
+			})
 		}
-
-		// "color:regex" の形式で解析
-		parts := strings.SplitN(pattern, ":", 2)
-		if len(parts) != 2 {
-			log.Printf("invalid color pattern format: %s (expected 'color:regex')", pattern)
-			continue
-		}
-
-		colorName := strings.TrimSpace(parts[0])
-		regexStr := strings.TrimSpace(parts[1])
-
-		// 正規表現をコンパイル
-		regex, err := regexp.Compile(regexStr)
-		if err != nil {
-			log.Printf("invalid regex pattern '%s': %v", regexStr, err)
-			continue
-		}
-
-		// 色を取得
-		color := getColor(colorName)
-
-		// パターンを追加
-		colorPatterns = append(colorPatterns, ColorPattern{
-			Pattern: regex,
-			Color:   color,
-		})
 	}
 }
 
+type repeatedStrings []string
+
+func (r *repeatedStrings) String() string {
+	if r == nil {
+		return ""
+	}
+	return strings.Join(*r, ",")
+}
+
+func (r *repeatedStrings) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	*r = append(*r, value)
+	return nil
+}
+
 // ---------- 共通ヘルパ ----------
+
+type globalOptions struct {
+	showLogo  bool
+	colorLogo bool
+}
+
+func parseGlobalArgs(args []string) (globalOptions, string, []string) {
+	opts := globalOptions{showLogo: true, colorLogo: true}
+	for len(args) > 0 {
+		arg := args[0]
+		switch {
+		case arg == "--no-logo":
+			opts.showLogo = false
+			args = args[1:]
+		case arg == "--no-color-logo":
+			opts.colorLogo = false
+			args = args[1:]
+		case arg == "--version" || arg == "-v":
+			fmt.Println(version)
+			os.Exit(0)
+		case arg == "--color":
+			if len(args) < 2 {
+				log.Fatal("missing value for --color (auto, always, never)")
+			}
+			setColorMode(args[1])
+			args = args[2:]
+		case strings.HasPrefix(arg, "--color="):
+			setColorMode(strings.TrimPrefix(arg, "--color="))
+			args = args[1:]
+		case arg == "-h" || arg == "--help" || arg == "help":
+			usage(opts, 0)
+		default:
+			return opts, arg, args[1:]
+		}
+	}
+	return opts, "", nil
+}
+
+func setColorMode(mode string) {
+	switch strings.ToLower(mode) {
+	case "auto":
+		selectedColorMode = colorAuto
+		return
+	case "always":
+		selectedColorMode = colorAlways
+		color.NoColor = false
+	case "never":
+		selectedColorMode = colorNever
+		color.NoColor = true
+	default:
+		log.Fatalf("invalid --color value %q (expected auto, always, never)", mode)
+	}
+}
+
+func applyColorOptions(colorOpts repeatedStrings) {
+	if len(colorOpts) == 0 {
+		return
+	}
+	parseColorPatterns(colorOpts)
+}
+
+func validateLineCount(n int) {
+	if n < 0 {
+		log.Fatalf("-n must be >= 0")
+	}
+}
+
+func validateInterval(interval time.Duration) {
+	if interval <= 0 {
+		log.Fatalf("-interval must be > 0")
+	}
+}
+
+func printLine(text string) {
+	fmt.Println(applyColorPatterns(text))
+}
 
 // 最新 (mod time が最大) の通常ファイルを返す
 func newestFile(dir string) (string, error) {
@@ -195,35 +314,29 @@ func newestFileWithPattern(dir, pattern string) (string, error) {
 	var newest string
 	var newestMod time.Time
 
-	// ワイルドカードパターンを正規表現に変換
-	regexPattern := strings.ReplaceAll(pattern, ".", "\\.")
-	regexPattern = strings.ReplaceAll(regexPattern, "*", ".*")
-	regexPattern = strings.ReplaceAll(regexPattern, "?", ".")
-	regex, err := regexp.Compile("^" + regexPattern + "$")
-	if err != nil {
-		return "", fmt.Errorf("invalid pattern '%s': %v", pattern, err)
-	}
-
-	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			// ファイル名のみを取得
-			fileName := filepath.Base(p)
-			// パターンにマッチするかチェック
-			if regex.MatchString(fileName) && info.ModTime().After(newestMod) {
-				newest, newestMod = p, info.ModTime()
-			}
-		}
-		return nil
-	})
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		matched, err := filepath.Match(pattern, entry.Name())
+		if err != nil {
+			return "", fmt.Errorf("invalid pattern '%s': %v", pattern, err)
+		}
+		if !matched {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", err
+		}
+		if info.Mode().IsRegular() && info.ModTime().After(newestMod) {
+			newest = filepath.Join(dir, entry.Name())
+			newestMod = info.ModTime()
+		}
 	}
 	if newest == "" {
 		return "", fmt.Errorf("no files matching pattern '%s' in %s", pattern, dir)
@@ -232,24 +345,32 @@ func newestFileWithPattern(dir, pattern string) (string, error) {
 }
 
 // ファイルを tail して標準出力へ
-func follow(path string) error {
+func startFollow(path string, offset int64) (*tail.Tail, <-chan error, error) {
 	cfg := tail.Config{
 		Follow:    true,
 		ReOpen:    true, // ローテーション追従
 		MustExist: true,
 		Poll:      true, // cross-platform
 		Logger:    tail.DiscardingLogger,
-		Location:  &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd}, // ファイルの末尾から読み始める
+		Location:  &tail.SeekInfo{Offset: offset, Whence: io.SeekStart},
 	}
 	t, err := tail.TailFile(path, cfg)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	for line := range t.Lines {
-		coloredLine := applyColorPatterns(line.Text)
-		fmt.Println(coloredLine)
-	}
-	return nil
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		for line := range t.Lines {
+			if line.Err != nil {
+				errCh <- line.Err
+				return
+			}
+			printLine(line.Text)
+		}
+	}()
+	return t, errCh, nil
 }
 
 // ---------- サブコマンド: file ----------
@@ -257,40 +378,72 @@ func follow(path string) error {
 func cmdFile(args []string) {
 	fs := flag.NewFlagSet("file", flag.ExitOnError)
 	nLines := fs.Int("n", 10, "show last N lines then follow")
-	colorOpts := fs.String("c", "", "color patterns in format 'color:regex' (can be used multiple times)")
+	var colorOpts repeatedStrings
+	fs.Var(&colorOpts, "c", "color patterns in format 'color:regex' (can be used multiple times)")
 	fs.Parse(args)
 
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: trail file [options] <file>")
 	}
+	validateLineCount(*nLines)
 	file := fs.Arg(0)
 
-	// 色付きパターンを解析
-	if *colorOpts != "" {
-		parseColorPatterns(*colorOpts)
+	applyColorOptions(colorOpts)
+
+	offset, err := printLastN(file, *nLines)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// 直近 N 行だけ先に出力
-	printLastN(file, *nLines)
-
-	if err := follow(file); err != nil {
+	_, errCh, err := startFollow(file, offset)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := <-errCh; err != nil {
 		log.Fatal(err)
 	}
 }
 
-func printLastN(path string, n int) {
-	data, err := os.ReadFile(path)
+func printLastN(path string, n int) (int64, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return
+		return 0, err
 	}
-	all := strings.Split(string(data), "\n")
-	if n > len(all) {
-		n = len(all)
+	defer f.Close()
+
+	if n == 0 {
+		offset, err := f.Seek(0, io.SeekEnd)
+		return offset, err
 	}
-	for _, l := range all[len(all)-n:] {
-		coloredLine := applyColorPatterns(l)
-		fmt.Println(coloredLine)
+
+	ring := make([]string, n)
+	count := 0
+	reader := bufio.NewReader(f)
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimRight(line, "\r\n")
+			ring[count%n] = line
+			count++
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
 	}
+
+	start := 0
+	if count > n {
+		start = count - n
+	}
+	for i := start; i < count; i++ {
+		printLine(ring[i%n])
+	}
+
+	offset, err := f.Seek(0, io.SeekCurrent)
+	return offset, err
 }
 
 // ---------- サブコマンド: dir ----------
@@ -298,63 +451,103 @@ func printLastN(path string, n int) {
 func cmdDir(args []string) {
 	fs := flag.NewFlagSet("dir", flag.ExitOnError)
 	interval := fs.Duration("interval", 5*time.Second, "fallback polling interval")
-	colorOpts := fs.String("c", "", "color patterns in format 'color:regex' (can be used multiple times)")
+	var colorOpts repeatedStrings
+	fs.Var(&colorOpts, "c", "color patterns in format 'color:regex' (can be used multiple times)")
 	pattern := fs.String("pattern", "*", "file pattern to match (e.g., '*.log', 'app-*.log')")
 	nLines := fs.Int("n", 10, "show last N lines then follow")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: trail dir [options] <directory>")
 	}
+	validateLineCount(*nLines)
+	validateInterval(*interval)
 	dir := fs.Arg(0)
 
-	// 色付きパターンを解析
-	if *colorOpts != "" {
-		parseColorPatterns(*colorOpts)
-	}
+	applyColorOptions(colorOpts)
 
-	// 最初の対象ファイル
 	current, err := newestFileWithPattern(dir, *pattern)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("trailing %s (pattern: %s)", current, *pattern)
 
-	// 直近 N 行だけ先に出力
-	printLastN(current, *nLines)
+	offset, err := printLastN(current, *nLines)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	go func() {
-		if err := follow(current); err != nil {
-			log.Fatal(err)
-		}
-	}()
+	currentTail, currentErrCh, err := startFollow(current, offset)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// fsnotify で新規ファイル誕生を監視
-	watcher, _ := fsnotify.NewWatcher()
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer watcher.Close()
-	_ = watcher.Add(dir)
+	if err := watcher.Add(dir); err != nil {
+		log.Fatal(err)
+	}
 
 	timer := time.NewTicker(*interval)
+	defer timer.Stop()
+
+	switchToLatest := func() {
+		latest, err := newestFileWithPattern(dir, *pattern)
+		if err != nil {
+			log.Printf("latest file check failed: %v", err)
+			return
+		}
+		if latest == current {
+			return
+		}
+		if currentTail != nil {
+			if err := currentTail.Stop(); err != nil {
+				log.Printf("failed to stop tail for %s: %v", current, err)
+			}
+			if currentErrCh != nil {
+				<-currentErrCh
+			}
+			currentTail.Cleanup()
+		}
+
+		current = latest
+		log.Printf("switching to %s", current)
+		offset, err := printLastN(current, *nLines)
+		if err != nil {
+			log.Printf("failed to print last lines for %s: %v", current, err)
+			return
+		}
+		currentTail, currentErrCh, err = startFollow(current, offset)
+		if err != nil {
+			log.Printf("failed to follow %s: %v", current, err)
+		}
+	}
+
 	for {
 		select {
-		case ev := <-watcher.Events:
+		case ev, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
 			if ev.Op&(fsnotify.Create|fsnotify.Rename) != 0 {
-				if latest, _ := newestFileWithPattern(dir, *pattern); latest != current {
-					current = latest
-					log.Printf("switching to %s", current)
-					// 新しいファイルの直近 N 行だけ先に出力
-					printLastN(current, *nLines)
-					go follow(current)
-				}
+				switchToLatest()
 			}
-		case <-timer.C: // 監視失敗時の保険
-			if latest, _ := newestFileWithPattern(dir, *pattern); latest != current {
-				current = latest
-				log.Printf("switching to %s", current)
-				// 新しいファイルの直近 N 行だけ先に出力
-				printLastN(current, *nLines)
-				go follow(current)
+		case <-timer.C:
+			switchToLatest()
+		case err, ok := <-currentErrCh:
+			if !ok {
+				currentErrCh = nil
+				continue
 			}
-		case err := <-watcher.Errors:
+			if err != nil {
+				log.Printf("tail error for %s: %v", current, err)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
 			log.Printf("watch error: %v", err)
 		}
 	}
@@ -362,37 +555,39 @@ func cmdDir(args []string) {
 
 // ---------- ロゴ表示 ----------
 
-func showLogo() {
-	// 色付きロゴを表示（エラーが発生した場合はシンプル版を表示）
-	if err := showColoredLogo(); err != nil {
-		showSimpleLogo()
+func showLogo(w io.Writer, colored bool) {
+	if !colored {
+		showSimpleLogo(w)
+		return
+	}
+	if err := showColoredLogo(w); err != nil {
+		showSimpleLogo(w)
 	}
 }
 
-func showSimpleLogo() {
+func showSimpleLogo(w io.Writer) {
 	logo := `
-████████╗██████╗  █████╗ ██╗██╗     
-╚══██╔══╝██╔══██╗██╔══██╗██║██║     
-   ██║   ██████╔╝███████║██║██║     
-   ██║   ██╔══██╗██╔══██║██║██║     
+████████╗██████╗  █████╗ ██╗██╗
+╚══██╔══╝██╔══██╗██╔══██╗██║██║
+   ██║   ██████╔╝███████║██║██║
+   ██║   ██╔══██╗██╔══██║██║██║
    ██║   ██║  ██║██║  ██║██║███████╗
    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝
-                                    
+
    Tail with log-rotate follow
    Version ` + version + `
 `
-	fmt.Print(logo)
+	fmt.Fprint(w, logo)
 }
 
-func showColoredLogo() error {
-	// グラデーション効果でロゴを表示
+func showColoredLogo(w io.Writer) error {
 	colors := []*color.Color{
-		color.New(color.FgHiBlue),
-		color.New(color.FgHiCyan),
-		color.New(color.FgHiGreen),
-		color.New(color.FgHiYellow),
-		color.New(color.FgHiRed),
-		color.New(color.FgHiMagenta),
+		newColor(color.FgHiBlue),
+		newColor(color.FgHiCyan),
+		newColor(color.FgHiGreen),
+		newColor(color.FgHiYellow),
+		newColor(color.FgHiRed),
+		newColor(color.FgHiMagenta),
 	}
 	logoLines := []string{
 		"████████╗██████╗  █████╗ ██╗██╗     ",
@@ -408,13 +603,11 @@ func showColoredLogo() error {
 
 	for i, line := range logoLines {
 		if line == "" {
-			fmt.Println()
+			fmt.Fprintln(w)
 			continue
 		}
-
-		// ロゴの各行に異なる色を適用
 		colorIndex := i % len(colors)
-		colors[colorIndex].Println(line)
+		fmt.Fprintln(w, colors[colorIndex].Sprint(line))
 	}
 
 	return nil
@@ -423,24 +616,31 @@ func showColoredLogo() error {
 // ---------- main ----------
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
+	opts, command, args := parseGlobalArgs(os.Args[1:])
+	if command == "" {
+		usage(opts, 1)
 	}
-	switch os.Args[1] {
+	switch command {
 	case "-f", "file":
-		cmdFile(os.Args[2:])
+		cmdFile(args)
 	case "-d", "dir":
-		cmdDir(os.Args[2:])
+		cmdDir(args)
 	case "-h", "--help", "help":
-		usage()
+		usage(opts, 0)
 	default:
-		log.Fatalf("unknown command %q\n\n", os.Args[1])
+		log.Fatalf("unknown command %q\n\n", command)
 	}
 }
 
-func usage() {
-	showLogo()
-	fmt.Fprintf(os.Stderr, `trail - tail with log-rotate follow
+func usage(opts globalOptions, exitCode int) {
+	w := io.Writer(os.Stdout)
+	if exitCode != 0 {
+		w = os.Stderr
+	}
+	if opts.showLogo {
+		showLogo(w, opts.colorLogo)
+	}
+	fmt.Fprintf(w, `trail - tail with log-rotate follow
 
 USAGE
   trail [options] <command> [options] <path>
@@ -450,8 +650,10 @@ COMMANDS
 
 COMMON OPTIONS
   -h, --help         Show this help
+  -v, --version      Show version
   --no-logo          Disable logo display
   --no-color-logo    Disable colored logo (use simple ASCII art)
+  --color <mode>     Color output mode: auto, always, never (default auto)
 
 file OPTIONS
   -n <N>         Print last N lines before following (default 10)
@@ -472,10 +674,12 @@ EXAMPLES
   trail dir -pattern "*.log" "C:\Logs\MyService"
   trail dir -pattern "app-*.log" -n 50 "C:\Logs\MyService"
   trail file -c "red:ERROR,green:DEBUG,blue:\d{2}-\d{2}" app.log
+  trail file -c "red:ERROR" -c "green:DEBUG" app.log
   trail dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
   trail dir -pattern "*.log" -c "red:ERROR" "C:\Logs\MyService"
   trail --no-logo file app.log
   trail --no-color-logo file app.log
+  trail --color always file -c "red:ERROR" app.log
 `)
-	os.Exit(1)
+	os.Exit(exitCode)
 }

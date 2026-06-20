@@ -1,3 +1,6 @@
+//go:build trailtest
+// +build trailtest
+
 package main
 
 import (

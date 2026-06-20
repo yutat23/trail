@@ -11,7 +11,7 @@ Goで書かれたテストプログラムです。
 #### 実行方法
 
 ```bash
-go run test_trail.go
+go run -tags trailtest test_trail.go
 ```
 
 #### テスト内容
@@ -91,4 +91,4 @@ Go版と同じテストを実行します。
 - ディレクトリの監視権限を確認
 
 ### テストプログラムが終了しない場合
-- 手動で `trail.exe` プロセスを終了: `taskkill /f /im trail.exe` 
+- 手動で `trail.exe` プロセスを終了: `taskkill /f /im trail.exe`
