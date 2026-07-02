@@ -40,7 +40,7 @@ const (
 var selectedColorMode = colorAuto
 
 // バージョン情報
-const version = "0.1.3"
+const version = "0.1.4"
 
 func newColor(attrs ...color.Attribute) *color.Color {
 	c := color.New(attrs...)
