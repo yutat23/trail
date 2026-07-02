@@ -9,13 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/fsnotify/fsnotify"
-	"github.com/hpcloud/tail"
+	"github.com/nxadm/tail"
 )
 
 // ---------- 色付き表示のための構造体 ----------
@@ -54,37 +55,45 @@ func newColor(attrs ...color.Attribute) *color.Color {
 
 // 色名をcolor.Colorに変換
 func getColor(colorName string) (*color.Color, bool) {
+	attrs, ok := colorAttributes(colorName)
+	if !ok {
+		return nil, false
+	}
+	return newColor(attrs...), true
+}
+
+func colorAttributes(colorName string) ([]color.Attribute, bool) {
 	switch strings.ToLower(colorName) {
 	case "red":
-		return newColor(color.FgRed), true
+		return []color.Attribute{color.FgRed}, true
 	case "green":
-		return newColor(color.FgGreen), true
+		return []color.Attribute{color.FgGreen}, true
 	case "blue":
-		return newColor(color.FgBlue), true
+		return []color.Attribute{color.FgBlue}, true
 	case "yellow":
-		return newColor(color.FgYellow), true
+		return []color.Attribute{color.FgYellow}, true
 	case "magenta":
-		return newColor(color.FgMagenta), true
+		return []color.Attribute{color.FgMagenta}, true
 	case "cyan":
-		return newColor(color.FgCyan), true
+		return []color.Attribute{color.FgCyan}, true
 	case "white":
-		return newColor(color.FgWhite), true
+		return []color.Attribute{color.FgWhite}, true
 	case "black":
-		return newColor(color.FgBlack), true
+		return []color.Attribute{color.FgBlack}, true
 	case "brightred":
-		return newColor(color.FgHiRed), true
+		return []color.Attribute{color.FgHiRed}, true
 	case "brightgreen":
-		return newColor(color.FgHiGreen), true
+		return []color.Attribute{color.FgHiGreen}, true
 	case "brightblue":
-		return newColor(color.FgHiBlue), true
+		return []color.Attribute{color.FgHiBlue}, true
 	case "brightyellow":
-		return newColor(color.FgHiYellow), true
+		return []color.Attribute{color.FgHiYellow}, true
 	case "brightmagenta":
-		return newColor(color.FgHiMagenta), true
+		return []color.Attribute{color.FgHiMagenta}, true
 	case "brightcyan":
-		return newColor(color.FgHiCyan), true
+		return []color.Attribute{color.FgHiCyan}, true
 	case "brightwhite":
-		return newColor(color.FgHiWhite), true
+		return []color.Attribute{color.FgHiWhite}, true
 	default:
 		return nil, false
 	}
@@ -167,7 +176,7 @@ func applyColorPatterns(text string) string {
 // 色付きパターンを解析
 func parseColorPatterns(colorOpts []string) {
 	for _, colorOpt := range colorOpts {
-		patterns := strings.Split(colorOpt, ",")
+		patterns := splitColorPatterns(colorOpt)
 		for _, pattern := range patterns {
 			pattern = strings.TrimSpace(pattern)
 			if pattern == "" {
@@ -206,6 +215,35 @@ func parseColorPatterns(colorOpts []string) {
 			})
 		}
 	}
+}
+
+func splitColorPatterns(colorOpt string) []string {
+	var patterns []string
+	start := 0
+	for i, r := range colorOpt {
+		if r != ',' {
+			continue
+		}
+		if isColorPatternStart(colorOpt[i+1:]) {
+			patterns = append(patterns, colorOpt[start:i])
+			start = i + 1
+		}
+	}
+	return append(patterns, colorOpt[start:])
+}
+
+func isColorPatternStart(s string) bool {
+	s = strings.TrimLeft(s, " \t\r\n")
+	colon := strings.IndexByte(s, ':')
+	if colon <= 0 {
+		return false
+	}
+	name := strings.TrimSpace(s[:colon])
+	if strings.ContainsAny(name, " \t\r\n") {
+		return false
+	}
+	_, ok := colorAttributes(name)
+	return ok
 }
 
 type repeatedStrings []string
@@ -301,6 +339,7 @@ func validateInterval(interval time.Duration) {
 }
 
 func printLine(text string) {
+	text = strings.TrimRight(text, "\r")
 	fmt.Println(applyColorPatterns(text))
 }
 
@@ -350,7 +389,7 @@ func startFollow(path string, offset int64) (*tail.Tail, <-chan error, error) {
 		Follow:    true,
 		ReOpen:    true, // ローテーション追従
 		MustExist: true,
-		Poll:      true, // cross-platform
+		Poll:      runtime.GOOS == "windows",
 		Logger:    tail.DiscardingLogger,
 		Location:  &tail.SeekInfo{Offset: offset, Whence: io.SeekStart},
 	}
@@ -416,14 +455,22 @@ func printLastN(path string, n int) (int64, error) {
 		return offset, err
 	}
 
-	ring := make([]string, n)
+	initialCap := n
+	if initialCap > 1024 {
+		initialCap = 1024
+	}
+	ring := make([]string, 0, initialCap)
 	count := 0
 	reader := bufio.NewReader(f)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
 			line = strings.TrimRight(line, "\r\n")
-			ring[count%n] = line
+			if len(ring) < n {
+				ring = append(ring, line)
+			} else {
+				ring[count%n] = line
+			}
 			count++
 		}
 		if err == io.EOF {
@@ -439,7 +486,11 @@ func printLastN(path string, n int) (int64, error) {
 		start = count - n
 	}
 	for i := start; i < count; i++ {
-		printLine(ring[i%n])
+		if count <= n {
+			printLine(ring[i])
+		} else {
+			printLine(ring[i%n])
+		}
 	}
 
 	offset, err := f.Seek(0, io.SeekCurrent)
@@ -447,6 +498,59 @@ func printLastN(path string, n int) (int64, error) {
 }
 
 // ---------- サブコマンド: dir ----------
+
+type followHandle interface {
+	Stop() error
+	Cleanup()
+}
+
+type followState struct {
+	path  string
+	tail  followHandle
+	errCh <-chan error
+}
+
+type printLastNFunc func(string, int) (int64, error)
+type startFollowFunc func(string, int64) (followHandle, <-chan error, error)
+
+func stopFollow(state followState) {
+	if state.tail == nil {
+		return
+	}
+	if err := state.tail.Stop(); err != nil {
+		log.Printf("failed to stop tail for %s: %v", state.path, err)
+	}
+	if state.errCh != nil {
+		<-state.errCh
+	}
+	state.tail.Cleanup()
+}
+
+func switchFollowToLatest(state followState, latest string, nLines int, printLast printLastNFunc, startFollow startFollowFunc) followState {
+	if latest == state.path {
+		return state
+	}
+
+	offset, err := printLast(latest, nLines)
+	if err != nil {
+		log.Printf("failed to print last lines for %s: %v", latest, err)
+		return state
+	}
+
+	nextTail, nextErrCh, err := startFollow(latest, offset)
+	if err != nil {
+		log.Printf("failed to follow %s: %v", latest, err)
+		return state
+	}
+
+	stopFollow(state)
+	log.Printf("switching to %s", latest)
+	return followState{
+		path:  latest,
+		tail:  nextTail,
+		errCh: nextErrCh,
+	}
+}
 
 func cmdDir(args []string) {
 	fs := flag.NewFlagSet("dir", flag.ExitOnError)
@@ -480,6 +584,7 @@ func cmdDir(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	state := followState{path: current, tail: currentTail, errCh: currentErrCh}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -502,27 +607,11 @@ func cmdDir(args []string) {
 		if latest == current {
 			return
 		}
-		if currentTail != nil {
-			if err := currentTail.Stop(); err != nil {
-				log.Printf("failed to stop tail for %s: %v", current, err)
-			}
-			if currentErrCh != nil {
-				<-currentErrCh
-			}
-			currentTail.Cleanup()
-		}
-
-		current = latest
-		log.Printf("switching to %s", current)
-		offset, err := printLastN(current, *nLines)
-		if err != nil {
-			log.Printf("failed to print last lines for %s: %v", current, err)
-			return
-		}
-		currentTail, currentErrCh, err = startFollow(current, offset)
-		if err != nil {
-			log.Printf("failed to follow %s: %v", current, err)
-		}
+		state = switchFollowToLatest(state, latest, *nLines, printLastN, func(path string, offset int64) (followHandle, <-chan error, error) {
+			return startFollow(path, offset)
+		})
+		current = state.path
+		currentErrCh = state.errCh
 	}
 
 	for {
@@ -657,14 +746,15 @@ COMMON OPTIONS
 
 file OPTIONS
   -n <N>         Print last N lines before following (default 10)
-  -c <patterns>  Color patterns in format 'color:regex' (can be used multiple times)
+  -c <pattern>   Color pattern in format 'color:regex' (can be used multiple times)
+                 Comma-separated color entries are also supported
                  Colors: red, green, blue, yellow, magenta, cyan, white, black
                  Bright colors: brightred, brightgreen, brightblue, brightyellow, brightmagenta, brightcyan, brightwhite
 
 dir  OPTIONS
   -n <N>         Print last N lines before following (default 10)
   -interval <d>  Polling fallback interval (default 5s)
-  -c <patterns>  Color patterns in format 'color:regex' (can be used multiple times)
+  -c <pattern>   Color pattern in format 'color:regex' (can be used multiple times)
   -pattern <p>   File pattern to match (e.g., '*.log', 'app-*.log', 'service-*.txt')
 
 EXAMPLES
@@ -674,6 +764,7 @@ EXAMPLES
   trail dir -pattern "*.log" "C:\Logs\MyService"
   trail dir -pattern "app-*.log" -n 50 "C:\Logs\MyService"
   trail file -c "red:ERROR,green:DEBUG,blue:\d{2}-\d{2}" app.log
+  trail file -c "red:\d{2,4}" app.log
   trail file -c "red:ERROR" -c "green:DEBUG" app.log
   trail dir -c "yellow:WARN,red:ERROR" "C:\Logs\MyService"
   trail dir -pattern "*.log" -c "red:ERROR" "C:\Logs\MyService"

@@ -64,7 +64,7 @@ trail file [options] <file_path>
 #### Options
 
 - `-n <N>`: Print last N lines before following (default: 10)
-- `-c <patterns>`: Color patterns in format 'color:regex' (can be used multiple times)
+- `-c <pattern>`: Color pattern in format 'color:regex' (can be used multiple times)
 
 #### Color Options
 
@@ -73,7 +73,8 @@ Available colors:
 - Bright colors: `brightred`, `brightgreen`, `brightblue`, `brightyellow`, `brightmagenta`, `brightcyan`, `brightwhite`
 
 Color pattern format: `color:regex`
-- Multiple patterns can be specified by separating with commas or by repeating `-c`
+- Prefer repeating `-c` for multiple patterns, especially when the regex itself contains commas
+- Comma-separated color entries are also supported when each entry starts with `color:`
 - If matches overlap, later color patterns take precedence
 - Example: `"red:ERROR,green:DEBUG,yellow:WARN"`
 
@@ -91,6 +92,9 @@ trail file -c "red:ERROR,green:DEBUG,yellow:WARN" app.log
 
 # Highlight date patterns in blue
 trail file -c "blue:\d{2}-\d{2}" app.log
+
+# Highlight a regex that contains a comma
+trail file -c "red:\d{2,4}" app.log
 
 # Multiple color patterns
 trail file -c "red:ERROR,green:DEBUG,blue:\d{4}-\d{2}-\d{2}" app.log
@@ -116,7 +120,7 @@ trail dir [options] <directory_path>
 
 - `-n <N>`: Print last N lines before following (default: 10)
 - `-interval <duration>`: Polling fallback interval (default: 5s)
-- `-c <patterns>`: Color patterns in format 'color:regex' (can be used multiple times)
+- `-c <pattern>`: Color pattern in format 'color:regex' (can be used multiple times)
 - `-pattern <pattern>`: File pattern to match (e.g., `*.log`, `app-*.log`, `service-*.txt`)
 
 #### Pattern Matching
@@ -177,7 +181,7 @@ trail.exe dir -pattern "app-*.log" -n 50 -c "red:ERROR" "C:\Logs\MyService"
 - Supports wildcard pattern matching to filter files (e.g., only `.log` files)
 - Monitors the directory for new files in that directory
 - Automatically switches to newer files when they appear
-- Uses filesystem notifications with polling fallback for reliability
+- Uses filesystem notifications with interval polling fallback for directory changes
 - Applies color highlighting to all monitored files
 
 ### Color Highlighting
@@ -190,7 +194,7 @@ trail.exe dir -pattern "app-*.log" -n 50 -c "red:ERROR" "C:\Logs\MyService"
 ## Dependencies
 
 - [fsnotify](https://github.com/fsnotify/fsnotify) - Cross-platform file system notifications
-- [tail](https://github.com/hpcloud/tail) - File tailing library with rotation support
+- [tail](https://github.com/nxadm/tail) - File tailing library with rotation support
 - [color](https://github.com/fatih/color) - Colored terminal output
 
 ## Requirements

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -231,6 +232,25 @@ func TestParseColorPatternsTrimsMultipleOptionsAndKeepsOrder(t *testing.T) {
 	}
 }
 
+func TestParseColorPatternsAllowsCommasInsideRegex(t *testing.T) {
+	withReset(t)
+	setColorMode("always")
+
+	parseColorPatterns([]string{`red:\d{2,4}`, `green:DEBUG,yellow:WARN`})
+
+	if got, want := len(colorPatterns), 3; got != want {
+		t.Fatalf("len(colorPatterns) = %d, want %d", got, want)
+	}
+	if got, want := colorPatterns[0].Pattern.String(), `\d{2,4}`; got != want {
+		t.Fatalf("first pattern = %q, want %q", got, want)
+	}
+
+	got := applyColorPatterns("12 1234 DEBUG WARN")
+	requireContains(t, got, ansi("31", "12"))
+	requireContains(t, got, ansi("32", "DEBUG"))
+	requireContains(t, got, ansi("33", "WARN"))
+}
+
 func TestParseColorPatternsLogsInvalidEntries(t *testing.T) {
 	withReset(t)
 
@@ -352,6 +372,20 @@ func TestPrintLineAppliesColorsToJapaneseText(t *testing.T) {
 	}
 }
 
+func TestPrintLineTrimsCRBeforeApplyingAnchoredColors(t *testing.T) {
+	withReset(t)
+	setColorMode("always")
+	parseColorPatterns([]string{`red:ERROR$`})
+
+	out := captureStdout(t, func() {
+		printLine("2026-06-21 ERROR\r")
+	})
+
+	if out != "2026-06-21 "+ansi("31", "ERROR")+"\n" {
+		t.Fatalf("printLine output = %q", out)
+	}
+}
+
 func TestPrintLastNWithTrailingNewline(t *testing.T) {
 	withReset(t)
 
@@ -423,6 +457,29 @@ func TestPrintLastNVariants(t *testing.T) {
 
 		out := captureStdout(t, func() {
 			offset, err := printLastN(path, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if offset != int64(len(content)) {
+				t.Fatalf("offset = %d, want %d", offset, len(content))
+			}
+		})
+		if out != content {
+			t.Fatalf("printLastN output = %q, want %q", out, content)
+		}
+	})
+
+	t.Run("huge n with small file does not preallocate huge ring", func(t *testing.T) {
+		withReset(t)
+
+		path := filepath.Join(t.TempDir(), "small-huge-n.log")
+		content := "alpha\nbeta\n"
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		out := captureStdout(t, func() {
+			offset, err := printLastN(path, 1_000_000_000)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -515,6 +572,46 @@ func TestStartFollowPrintsAppendedJapaneseLinesWithColors(t *testing.T) {
 	requireContains(t, stripANSI(out), "2026-06-21 10:00:02 INFO 成功しました\n")
 }
 
+func TestStartFollowTrimsCRLFBeforeAnchoredColorMatch(t *testing.T) {
+	withReset(t)
+	setColorMode("always")
+	parseColorPatterns([]string{`red:ERROR$`})
+
+	path := filepath.Join(t.TempDir(), "follow-crlf.log")
+	initial := "2026-06-21 10:00:00 INFO start\r\n"
+	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		tailed, errCh, err := startFollow(path, int64(len([]byte(initial))))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		appendToFile(t, path, "2026-06-21 10:00:01 ERROR\r\n")
+		time.Sleep(1200 * time.Millisecond)
+
+		if err := tailed.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err, ok := <-errCh:
+			if ok && err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("tail did not stop")
+		}
+		tailed.Cleanup()
+	})
+
+	if out != "2026-06-21 10:00:01 "+ansi("31", "ERROR")+"\n" {
+		t.Fatalf("follow output = %q", out)
+	}
+}
+
 func TestNewestFileWithPatternSelectsNewestMatchingRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
@@ -595,6 +692,114 @@ func TestNewestFileWithPatternErrors(t *testing.T) {
 			t.Fatal("newestFileWithPattern error = nil")
 		}
 	})
+}
+
+type fakeFollowHandle struct {
+	stopped bool
+	cleaned bool
+}
+
+func (f *fakeFollowHandle) Stop() error {
+	f.stopped = true
+	return nil
+}
+
+func (f *fakeFollowHandle) Cleanup() {
+	f.cleaned = true
+}
+
+func TestSwitchFollowToLatestKeepsCurrentOnFailures(t *testing.T) {
+	t.Run("print last lines fails", func(t *testing.T) {
+		withReset(t)
+		oldTail := &fakeFollowHandle{}
+		state := followState{path: "old.log", tail: oldTail}
+
+		got := switchFollowToLatest(
+			state,
+			"new.log",
+			10,
+			func(string, int) (int64, error) {
+				return 0, errors.New("missing")
+			},
+			func(string, int64) (followHandle, <-chan error, error) {
+				t.Fatal("startFollow should not be called")
+				return nil, nil, nil
+			},
+		)
+
+		if got.path != state.path || got.tail != state.tail {
+			t.Fatalf("state = %+v, want unchanged %+v", got, state)
+		}
+		if oldTail.stopped || oldTail.cleaned {
+			t.Fatalf("old tail stopped=%v cleaned=%v, want both false", oldTail.stopped, oldTail.cleaned)
+		}
+	})
+
+	t.Run("start follow fails", func(t *testing.T) {
+		withReset(t)
+		oldTail := &fakeFollowHandle{}
+		state := followState{path: "old.log", tail: oldTail}
+
+		got := switchFollowToLatest(
+			state,
+			"new.log",
+			10,
+			func(path string, n int) (int64, error) {
+				if path != "new.log" || n != 10 {
+					t.Fatalf("printLastN args = (%q, %d)", path, n)
+				}
+				return 42, nil
+			},
+			func(path string, offset int64) (followHandle, <-chan error, error) {
+				if path != "new.log" || offset != 42 {
+					t.Fatalf("startFollow args = (%q, %d)", path, offset)
+				}
+				return nil, nil, errors.New("gone")
+			},
+		)
+
+		if got.path != state.path || got.tail != state.tail {
+			t.Fatalf("state = %+v, want unchanged %+v", got, state)
+		}
+		if oldTail.stopped || oldTail.cleaned {
+			t.Fatalf("old tail stopped=%v cleaned=%v, want both false", oldTail.stopped, oldTail.cleaned)
+		}
+	})
+}
+
+func TestSwitchFollowToLatestUpdatesOnlyAfterNewFollowStarts(t *testing.T) {
+	withReset(t)
+	oldTail := &fakeFollowHandle{}
+	newTail := &fakeFollowHandle{}
+	oldErrCh := make(chan error)
+	close(oldErrCh)
+	newErrCh := make(chan error)
+	state := followState{path: "old.log", tail: oldTail, errCh: oldErrCh}
+
+	got := switchFollowToLatest(
+		state,
+		"new.log",
+		3,
+		func(path string, n int) (int64, error) {
+			if path != "new.log" || n != 3 {
+				t.Fatalf("printLastN args = (%q, %d)", path, n)
+			}
+			return 99, nil
+		},
+		func(path string, offset int64) (followHandle, <-chan error, error) {
+			if path != "new.log" || offset != 99 {
+				t.Fatalf("startFollow args = (%q, %d)", path, offset)
+			}
+			return newTail, newErrCh, nil
+		},
+	)
+
+	if got.path != "new.log" || got.tail != newTail || got.errCh != newErrCh {
+		t.Fatalf("state = %+v, want new follow", got)
+	}
+	if !oldTail.stopped || !oldTail.cleaned {
+		t.Fatalf("old tail stopped=%v cleaned=%v, want both true", oldTail.stopped, oldTail.cleaned)
+	}
 }
 
 func TestRepeatedStrings(t *testing.T) {
